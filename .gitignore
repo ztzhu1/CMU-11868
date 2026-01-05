@@ -1,3 +1,5 @@
 __pycache__
 *egg-info
 .hypothesis
+.clang-format
+cuda_kernels
