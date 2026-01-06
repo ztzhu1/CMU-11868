@@ -101,9 +101,25 @@ def topological_sort(variable: Variable) -> Iterable[Variable]:
         Non-constant Variables in topological order starting from the right.
     """
     # BEGIN ASSIGN2_1
-    # TODO
-    
-    raise NotImplementedError("Task Autodiff Not Implemented Yet")
+    visited = set()
+    variables = []
+
+    def add(var):
+        if var.is_constant():
+            return
+        if var.unique_id not in visited:
+            variables.append(var)
+            visited.add(var.unique_id)
+
+    def dfs(v):
+        if not v.is_leaf() and not v.is_constant():
+            for parent in v.parents:
+                if parent.unique_id not in visited:
+                    dfs(parent)
+        add(v)
+
+    dfs(variable)
+    return variables[::-1]
     # END ASSIGN2_1
 
 
@@ -114,14 +130,22 @@ def backpropagate(variable: Variable, deriv: Any) -> None:
 
     Args:
         variable: The right-most variable
-        deriv  : Its derivative that we want to propagate backward to the leaves.
+        deriv (dl_dv) : Its derivative that we want to propagate backward to the leaves.
 
     No return. Should write to its results to the derivative values of each leaf through `accumulate_derivative`.
     """
     # BEGIN ASSIGN2_1
-    # TODO
-   
-    raise NotImplementedError("Task Autodiff Not Implemented Yet")
+    variables = topological_sort(variable)
+    grads = {variable.unique_id: deriv}
+    for v in variables:
+        if v.is_leaf():
+            v.accumulate_derivative(grads[v.unique_id])
+        else:
+            assert not v.is_constant()
+            assert v.unique_id in grads
+            for parent, dl_dp in v.chain_rule(grads[v.unique_id]):
+                grads.setdefault(parent.unique_id, 0)
+                grads[parent.unique_id] += dl_dp
     # END ASSIGN2_1
 
 

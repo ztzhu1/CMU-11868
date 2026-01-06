@@ -1,6 +1,7 @@
 import random
 import embeddings
 from datasets import load_dataset
+import numpy as np
 
 import sys
 sys.path.append('../')
@@ -53,14 +54,14 @@ class Linear(minitorch.Module):
         # 2. Initialize self.bias to be a random parameter of (out_size)
         # 3. Set self.out_size to be out_size
         # HINT: make sure to use the RParam function
-    
-        raise NotImplementedError("Linear not implemented")
-    
+        self.weights = RParam(in_size, out_size)
+        self.bias = RParam(out_size)
+        self.out_size = out_size
         # END ASSIGN2_2
 
     def forward(self, x):
         
-        batch, in_size = x.shape
+        shape = x.shape
         
         # BEGIN ASSIGN2_2
         # TODO
@@ -69,9 +70,10 @@ class Linear(minitorch.Module):
         # 3. Apply Matrix Multiplication on input x and self.weights, and reshape the output to be of size (batch, self.out_size)
         # 4. Add self.bias
         # HINT: You can use the view function of minitorch.tensor for reshape
-
-        raise NotImplementedError("Linear forward not implemented")
-    
+        x = x.view(np.prod(shape[:-1]), shape[-1])
+        x = x @ self.weights.value + self.bias.value
+        x = x.view(*shape[:-1], self.out_size)
+        return x
         # END ASSIGN2_2
         
         
@@ -102,9 +104,8 @@ class Network(minitorch.Module):
         # BEGIN ASSIGN2_2
         # TODO
         # 1. Construct two linear layers: the first one is embedding_dim * hidden_dim, the second one is hidden_dim * 1
-
-        raise NotImplementedError("Network not implemented")
-        
+        self.fc1 = Linear(embedding_dim, hidden_dim)
+        self.fc2 = Linear(hidden_dim, 1)
         # END ASSIGN2_2
         
         
@@ -122,9 +123,13 @@ class Network(minitorch.Module):
         # 4. Apply the second linear layer
         # 5. Apply sigmoid and reshape to (batch)
         # HINT: You can use minitorch.dropout for dropout, and minitorch.tensor.relu for ReLU
-        
-        raise NotImplementedError("Network forward not implemented")
-    
+        x = embeddings.mean(dim=1)
+        x = self.fc1(x)
+        x = minitorch.Tensor.relu(x)
+        x = minitorch.dropout(x, self.dropout_prob)
+        x = self.fc2(x)
+        x = minitorch.Tensor.sigmoid(x)
+        return x
         # END ASSIGN2_2
 
 
