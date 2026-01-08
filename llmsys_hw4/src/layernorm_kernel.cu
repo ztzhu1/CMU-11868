@@ -311,12 +311,33 @@ __global__ void ker_ln_bw_dinp(T *inp_grad, const T *out_grad, const T *inp,
   float reduce_prod = prod.x + prod.y + prod.z + prod.w;
   float reduce_val[2] = {reduce_dxhat, reduce_prod};
   warpReduce<ReduceType::kSum, 2>(reduce_val);
+  __shared__ float reduce_buf_dxhat[32];
+  __shared__ float reduce_buf_prod[32];
+  if (threadIdx.x % 32 == 0) {
+    reduce_buf_dxhat[threadIdx.x / 32] = reduce_val[0];
+    reduce_buf_prod[threadIdx.x / 32] = reduce_val[1];
+  }
+  __syncthreads();
+  float buf[2] = {0.0, 0.0};
+  if (threadIdx.x < (blockDim.x + 32 - 1) / 32) {
+    buf[0] = reduce_buf_dxhat[threadIdx.x];
+    buf[1] = reduce_buf_prod[threadIdx.x];
+  }
+  warpReduce<ReduceType::kSum, 2>(buf);
+  if (threadIdx.x == 0) {
+    reduce_buf_dxhat[0] = buf[0];
+    reduce_buf_prod[1] = buf[1];
+  }
+  __syncthreads();
+
+  float dxhat_sum = reduce_buf_dxhat[0];
+  float prod_sum = reduce_buf_prod[1];
   for (int idx = threadIdx.x; idx < hidden_dim; idx += blockDim.x) {
     float4 dinp_val = make_float4(
-                    rstd * (dxhat.x - (reduce_val[0] + xhat.x * reduce_val[1]) / (hidden_dim * 4)),
-                    rstd * (dxhat.y - (reduce_val[0] + xhat.y * reduce_val[1]) / (hidden_dim * 4)),
-                    rstd * (dxhat.z - (reduce_val[0] + xhat.z * reduce_val[1]) / (hidden_dim * 4)),
-                    rstd * (dxhat.w - (reduce_val[0] + xhat.w * reduce_val[1]) / (hidden_dim * 4))
+                    rstd * (dxhat.x - (dxhat_sum + xhat.x * prod_sum) / (hidden_dim * 4)),
+                    rstd * (dxhat.y - (dxhat_sum + xhat.y * prod_sum) / (hidden_dim * 4)),
+                    rstd * (dxhat.z - (dxhat_sum + xhat.z * prod_sum) / (hidden_dim * 4)),
+                    rstd * (dxhat.w - (dxhat_sum + xhat.w * prod_sum) / (hidden_dim * 4))
                   );
     inp_grad_f4[idx] = dinp_val;
   }
