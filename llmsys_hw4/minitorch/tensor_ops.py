@@ -241,7 +241,7 @@ class SimpleOps(TensorOps):
       raise NotImplementedError("Not implemented in this assignment")
 
     @staticmethod
-    def layernorm_fw(inp: tensor):
+    def layernorm_fw(inp: Tensor):
       raise NotImplementedError("Not implemented in this assignment")
 
     @staticmethod

@@ -150,7 +150,24 @@ __global__ void ker_attn_softmax(T *inp, const T *attn_mask, int from_len,
     /* step 1. compute max */
     // thread local max
     // BEGIN ASSIGN4_1_1
-    
+    float val[token_per_reduce][ele_per_thread];
+    float l_max[token_per_reduce];
+    for (int i = 0; i < token_per_reduce; i++) {
+      l_max[i] = REDUCE_FLOAT_INF_NEG;
+      for (int j = 0; j < ele_per_thread; j++) {
+        float temp_val;
+        if (mask_future && ele_per_thread * threadIdx.x + j > token_id + i) {
+          temp_val = REDUCE_FLOAT_INF_NEG;
+        } else {
+          temp_val = (float)inp_val[i][j];
+          if (attn_mask) {
+            temp_val += (float)mval[j];
+          }
+        }
+        val[i][j] = temp_val;
+        l_max[i] = fmaxf(l_max[i], temp_val);
+      }
+    }
     // END ASSIGN4_1_1
     // block reduce max
     blockReduce<ReduceType::kMax, token_per_reduce>(l_max);
@@ -166,6 +183,14 @@ __global__ void ker_attn_softmax(T *inp, const T *attn_mask, int from_len,
     /* step 2. compute sum */
     // thread local sum
     // BEGIN ASSIGN4_1_1
+    float l_sum[token_per_reduce];
+    for (int i = 0; i < token_per_reduce; i++) {
+      l_sum[i] = 0.f;
+      for (int j = 0; j < ele_per_thread; j++) {
+        val[i][j] = __expf(val[i][j] - s_max[i]);
+        l_sum[i] += val[i][j];
+      }
+    }
     
     // END ASSIGN4_1_1
     // block reduce sum
@@ -181,6 +206,13 @@ __global__ void ker_attn_softmax(T *inp, const T *attn_mask, int from_len,
 
     /* step 3. compute final result */
     // BEGIN ASSIGN4_1_1
+    for (int i = 0; i < token_per_reduce && (token_id + i) < from_len; i++) {
+      for (int j = 0; j < ele_per_thread; j++) {
+        inp_val[i][j] = (T)(val[i][j] * s_sum[i]);
+      }
+      BlockStore(ts_store).Store(inp + (token_id + i) * to_len, inp_val[i],
+                                 to_len);
+    }
    
     // END ASSIGN4_1_1
   }  // blockIdx.x
@@ -314,16 +346,62 @@ void launch_attn_softmax_bw(float *out_grad,
   dim3 grid_dim((rows + warps_per_block - 1) / warps_per_block);
   dim3 block_dim(WARP_SIZE, warps_per_block);
   // BEGIN ASSIGN4_1_2
-  
+  int float_size = sizeof(float);
+  int inp_size = rows * softmax_len * float_size;
+  float *d_inp, *d_grad;
+  cudaMalloc((void **)&d_inp, inp_size);
+  cudaMalloc((void **)&d_grad, inp_size);
+
+  cudaMemcpy(d_inp, soft_inp, inp_size, cudaMemcpyHostToDevice);
+  cudaMemcpy(d_grad, out_grad, inp_size, cudaMemcpyHostToDevice);
   
   // Launch kernel
   // Hint: use ker_attn_softmax_bw<float, ITERATIONS> depending on softmax_len
-  
+  if (softmax_len <= 32) {
+    ker_attn_softmax_bw<float, 1><<<grid_dim, block_dim, 0, stream>>>(
+        d_grad, d_inp, softmax_len);
+  } else if (softmax_len <= 64) {
+    ker_attn_softmax_bw<float, 2><<<grid_dim, block_dim, 0, stream>>>(
+        d_grad, d_inp, softmax_len);
+  } else if (softmax_len <= 128) {
+    ker_attn_softmax_bw<float, 4><<<grid_dim, block_dim, 0, stream>>>(
+        d_grad, d_inp, softmax_len);
+  } else if (softmax_len <= 256) {
+    ker_attn_softmax_bw<float, 8><<<grid_dim, block_dim, 0, stream>>>(
+        d_grad, d_inp, softmax_len);
+  } else if (softmax_len <= 384) {
+    ker_attn_softmax_bw<float, 12><<<grid_dim, block_dim, 0, stream>>>(
+        d_grad, d_inp, softmax_len);
+  } else if (softmax_len <= 512) {
+    ker_attn_softmax_bw<float, 16><<<grid_dim, block_dim, 0, stream>>>(
+        d_grad, d_inp, softmax_len);
+  } else if (softmax_len <= 768) {
+    ker_attn_softmax_bw<float, 24><<<grid_dim, block_dim, 0, stream>>>(
+        d_grad, d_inp, softmax_len);
+  } else if (softmax_len <= 1024) {
+    ker_attn_softmax_bw<float, 32><<<grid_dim, block_dim, 0, stream>>>(
+        d_grad, d_inp, softmax_len);
+  } else if (softmax_len <= 2048) {
+    ker_attn_softmax_bw<float, 64><<<grid_dim, block_dim, 0, stream>>>(
+        d_grad, d_inp, softmax_len);
+  } else {
+    throw std::runtime_error(
+        "softmax_len greater than 2048 is currently not supported");
+  }
   // Copy back to the host
-  
-  
+  cudaMemcpy(out_grad, d_grad, inp_size, cudaMemcpyDeviceToHost);
+  cudaDeviceSynchronize();
+
+  // Check CUDA execution
+  cudaError_t err = cudaGetLastError();
+  if (err != cudaSuccess) {
+    fprintf(stderr, "launch_attn_softmax_bw Error: %s\n", cudaGetErrorString(err));
+    exit(EXIT_FAILURE);
+  }
 
   // Free memory on device
+  cudaFree(d_inp);
+  cudaFree(d_grad);
   // END ASSIGN4_1_2
 
 }}
