@@ -1,0 +1,1 @@
+My implementation for [CMU 11868: Large Language Model Systems](https://llmsystem.github.io/llmsystem2025spring/) assignments. This repository focuses on CUDA-related components, including CUDA map and reduce kernels, tiled matrix multiplication, and custom forward/backward pass kernels for Softmax and LayerNorm. Automatic differentiation is also implemented.
